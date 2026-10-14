@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>大會攝影統籌系統</title>
+    
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 React 及 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- 引入 Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- 引入 PapaParse 用於讀取 CSV (如需雲端同步) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- 引入 FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* 強制全螢幕與隱藏整體滾動條，模擬 Native App */
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* 禁用外層滾動 */
+            background-color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overscroll-behavior-y: none;
+        }
+        
+        /* 自訂滾動條隱藏 */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* 確保 React 根節點佔滿全螢幕 */
+        #root {
+            height: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // 定義樓層顏色
+        const FLOOR_COLORS = {
+            '75/F': 'bg-red-600 text-white',
+            '62/F': 'bg-red-500 text-white',
+            '53/F': 'bg-red-400 text-white',
+            '48/F': 'bg-blue-600 text-white',
+            '46/F': 'bg-blue-500 text-white',
+            '29/F': 'bg-sky-500 text-white',
+            '21/F': 'bg-sky-400 text-white',
+            '15/F': 'bg-indigo-500 text-white',
+            '7/F': 'bg-indigo-400 text-white',
+            '3/F': 'bg-slate-600 text-white',
+            'G/F': 'bg-slate-800 text-white',
+            '機動': 'bg-purple-500 text-white'
+        };
+
+        const getFloorStyle = (floor) => FLOOR_COLORS[floor] || 'bg-gray-500 text-white';
+
+        // 大會主舞台與賽事進度 (Rundown)
+        let EVENT_RUNDOWN = {
+            '09:40': { stage: '司長處長到，邱主席帶領參觀', race: '' },
+            '09:50': { stage: '', race: '29層個人賽：開跑 (G/F)' },
+            '10:10': { stage: '主席致辭', race: '29層個人賽：完賽，約20分鐘 (29/F)' },
+            '10:15': { stage: '嘉賓致辭', race: '29層接力賽：開跑 (G/F)' },
+            '10:35': { stage: '星級跑集合、開賽', race: '星級跑：開跑 (46/F)' },
+            '10:55': { stage: '攤位介紹 OR Video', race: '親子體驗跑：開跑 (G/F)' },
+            '11:15': { stage: '中年好聲音 artists interview', race: '親子體驗跑：完賽，約20分鐘 (7/F)' },
+            '11:35': { stage: '', race: '75層個人賽事：開跑 (G/F)' },
+            '12:05': { stage: '表演', race: '75層個人賽：完賽，賽事約30分鐘 (75/F)' },
+            '12:10': { stage: '', race: '75層接力賽事：開跑 (G/F)' },
+            '12:45': { stage: '表演', race: '' },
+            '13:00': { stage: '頒獎', race: '' }
+        };
+
+        // 預設靜態數據
+        let TIMELINE_DATA = [
+            // 大會攝影 1
+            { time: '09:40', user: 'p1', floor: '46/F', task: '舞台' },
+            
+            // 大會攝影 2
+            { time: '09:40', user: 'p2', floor: '46/F', task: '嘉賓接待/攤位花絮/選手召集' },
+            { time: '10:35', user: 'p2', floor: '53/F', task: '星級跑終點' },
+            { time: '10:55', user: 'p2', floor: '46/F', task: '舞台/攤位花絮/選手召集' },
+            { time: '12:10', user: 'p2', floor: '48/F', task: '75層接力區' },
+            { time: '12:45', user: 'p2', floor: '46/F', task: '舞台/攤位' },
+            
+            // Pauline
+            { time: '09:40', user: 't2', floor: '機動', task: '全天候機動巡視，不綁死定點' },
+            
+            // Tim
+            { time: '10:10', user: 't1', floor: '46/F', task: '親子體驗跑: 召集及拍照' },
+            { time: '10:35', user: 't1', floor: '46/F', task: '星級跑起跑' },
+            { time: '12:10', user: 't1', floor: '62/F', task: '75層接力區' },
+            
+            // 義工 1 
+            { time: '09:45', user: 'v1', floor: 'G/F', task: '起點 29層個人' },
+            { time: '10:15', user: 'v1', floor: 'G/F', task: '29層接力賽' },
+            { time: '10:55', user: 'v1', floor: 'G/F', task: '親子體驗跑起跑' },
+            { time: '11:35', user: 'v1', floor: 'G/F', task: '75層個人賽起跑' },
+            { time: '12:10', user: 'v1', floor: 'G/F', task: '75層接力賽起跑' },
+            
+            // 義工 2 
+            { time: '09:45', user: 'v2', floor: '29/F', task: '個人終點' },
+            { time: '10:15', user: 'v2', floor: '29/F', task: '接力終點' },
+            { time: '10:55', user: 'v2', floor: '7/F', task: '親子跑終點1' },
+            { time: '11:35', user: 'v2', floor: '75/F', task: '75層個人賽終點1' },
+            { time: '12:10', user: 'v2', floor: '75/F', task: '75層接力賽終點1' },
+
+            // 義工 3 
+            { time: '09:45', user: 'v3', floor: '29/F', task: '個人終點' },
+            { time: '10:15', user: 'v3', floor: '21/F', task: '接力區2' },
+            { time: '10:55', user: 'v3', floor: '7/F', task: '親子跑終點2' },
+            { time: '12:10', user: 'v3', floor: '15/F', task: '75層接力區' },
+
+            // 義工 4 
+            { time: '10:15', user: 'v4', floor: '15/F', task: '接力區1' },
+            { time: '10:55', user: 'v4', floor: '3/F', task: '親子體驗跑' },
+            { time: '11:35', user: 'v4', floor: '75/F', task: '75層個人賽終點2' },
+            { time: '12:10', user: 'v4', floor: '75/F', task: '75層接力賽終點2' }
+        ];
+
+        let taskTimes = TIMELINE_DATA.map(d => d.time);
+        let eventTimes = Object.keys(EVENT_RUNDOWN);
+        let TIME_SLOTS = [...new Set([...taskTimes, ...eventTimes])].sort();
+        
+        const FLOOR_ORDER = ['75/F', '62/F', '53/F', '48/F', '46/F', '29/F', '21/F', '15/F', '7/F', '3/F', 'G/F', '機動'];
+
+        const USERS = {
+            'p1': { name: '大會攝影 1', icon: 'fa-camera', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+            'p2': { name: '大會攝影 2', icon: 'fa-camera', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+            't2': { name: 'Pauline', icon: 'fa-headset', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+            't1': { name: 'Tim', icon: 'fa-camera-retro', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+            'v1': { name: '義工 1', icon: 'fa-camera', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+            'v2': { name: '義工 2', icon: 'fa-camera', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+            'v3': { name: '義工 3', icon: 'fa-camera', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+            'v4': { name: '義工 4', icon: 'fa-camera', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+        };
+
+        const TaskCard = ({ task, isLive, isPast }) => {
+            const user = USERS[task.user];
+            return (
+                <div className={`p-4 rounded-2xl border mb-3 flex flex-col relative transition-all duration-500
+                    ${isPast ? 'opacity-40 grayscale hover:grayscale-0' : ''}
+                    ${isLive ? 'border-amber-400 bg-yellow-50 shadow-md ring-2 ring-amber-300 ring-opacity-50' : 'bg-white border-slate-100 shadow-sm'}
+                `}>
+                    {isLive && (
+                        <div className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-bounce shadow-sm">
+                            NEXT / LIVE
+                        </div>
+                    )}
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                            <span className={`px-2.5 py-1 rounded-lg text-sm font-bold shadow-sm ${getFloorStyle(task.floor)}`}>
+                                {task.floor}
+                            </span>
+                            <span className="text-slate-800 font-bold text-base">{task.task}</span>
+                        </div>
+                        <span className="text-slate-500 font-black text-lg bg-slate-100 px-2 rounded-md">{task.time}</span>
+                    </div>
+                    
+                    <div className="flex items-center mt-2 pt-2 border-t border-slate-100">
+                        <span className={`text-xs px-2 py-1 rounded-md font-medium flex items-center border ${user.color}`}>
+                            <i className={`fa-solid ${user.icon} mr-1.5`}></i> {user.name}
+                        </span>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = React.useState('person');
+            const [selectedUser, setSelectedUser] = React.useState('v1');
+            const [selectedTime, setSelectedTime] = React.useState(TIME_SLOTS[0]);
+            const [currentTimeStr, setCurrentTimeStr] = React.useState('');
+            const [mockTimeStr, setMockTimeStr] = React.useState(null); // 新增：用於測試的虛擬時間
+
+            // 即時時間比對
+            React.useEffect(() => {
+                const updateTime = () => {
+                    // 如果有開啟模擬測試時間，則優先使用
+                    if (mockTimeStr) {
+                        setCurrentTimeStr(mockTimeStr);
+                        return;
+                    }
+                    const now = new Date();
+                    const hh = String(now.getHours()).padStart(2, '0');
+                    const mm = String(now.getMinutes()).padStart(2, '0');
+                    setCurrentTimeStr(`${hh}:${mm}`);
+                };
+                updateTime();
+                const timer = setInterval(updateTime, 10000); // 縮短至每10秒檢查一次
+                return () => clearInterval(timer);
+            }, [mockTimeStr]);
+
+            // 提供手動修改時間的測試功能
+            const handleSetMockTime = () => {
+                const input = prompt("【時空穿梭測試】\n請輸入你想模擬的時間 (格式 HH:MM，例如 10:15)：\n(清空並按確定即可恢復真實時間)", mockTimeStr || currentTimeStr);
+                if (input !== null) {
+                    if (input.trim() === '') {
+                        setMockTimeStr(null);
+                    } else if (/^\d{2}:\d{2}$/.test(input)) {
+                        setMockTimeStr(input);
+                    } else {
+                        alert("格式錯誤，請輸入例如 10:15");
+                    }
+                }
+            };
+
+            // 判斷任務狀態
+            const getTaskStatus = (taskTime) => {
+                if (!currentTimeStr) return { isPast: false, isLive: false };
+                if (taskTime < currentTimeStr) return { isPast: true, isLive: false };
+                
+                // 找出第一個還沒過去的任務標示為 LIVE
+                const futureTasks = TIME_SLOTS.filter(t => t >= currentTimeStr);
+                const nextTime = futureTasks[0];
+                if (taskTime === nextTime) return { isPast: false, isLive: true };
+                
+                return { isPast: false, isLive: false };
+            };
+
+            const userTasks = TIMELINE_DATA.filter(t => t.user === selectedUser).sort((a, b) => a.time.localeCompare(b.time));
+            const timeTasks = TIMELINE_DATA.filter(t => t.time === selectedTime);
+            
+            // 找出該時間點全天候機動的人員
+            const mobileUsers = TIMELINE_DATA.filter(t => t.floor === '機動' && t.time === '09:40'); 
+
+            const getEventForTime = (time) => EVENT_RUNDOWN[time] || null;
+
+            return (
+                <div className="w-full max-w-md mx-auto h-full flex flex-col bg-slate-50 shadow-2xl relative overflow-hidden">
+                    
+                    {/* Header */}
+                    <header className="bg-slate-900 text-white p-4 rounded-b-3xl shadow-lg relative z-20 shrink-0">
+                        <div className="flex justify-between items-center mb-1">
+                            <div className="flex items-center">
+                                <h1 className="text-lg font-black tracking-wide">大會攝影統籌系統</h1>
+                                <button 
+                                    onClick={handleSetMockTime}
+                                    className={`ml-2 text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors shadow-sm ${mockTimeStr ? 'bg-purple-600 text-white animate-pulse ring-2 ring-purple-300' : 'bg-red-500 text-white animate-pulse'}`}
+                                >
+                                    {mockTimeStr ? '🛠️ 模擬:' : 'LIVE'} {currentTimeStr}
+                                </button>
+                            </div>
+                            <button 
+                                onClick={() => {
+                                    const url = prompt("【進階：雲端同步設定】\n請貼上 Google Sheet CSV 網址：\n(清空則恢復預設最新排表)", localStorage.getItem('sheetUrl') || '');
+                                    if (url !== null) {
+                                        localStorage.setItem('sheetUrl', url);
+                                        window.location.reload();
+                                    }
+                                }}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <i className="fa-solid fa-cloud-arrow-down"></i>
+                            </button>
+                        </div>
+                        <p className="text-slate-300 text-xs"><i className="fa-solid fa-calendar-day mr-1"></i>垂直馬拉松專用</p>
+                    </header>
+
+                    {/* Main Scrollable Content Area */}
+                    <main className="flex-1 overflow-y-auto hide-scrollbar p-4 pb-24 fade-in">
+                        
+                        {/* 視圖 1：我的任務 */}
+                        {view === 'person' && (
+                            <div className="space-y-4">
+                                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                                    <label className="block text-sm font-bold text-slate-500 mb-2">請選擇名字：</label>
+                                    <div className="relative">
+                                        <select 
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl appearance-none font-bold text-slate-800 text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            value={selectedUser}
+                                            onChange={(e) => setSelectedUser(e.target.value)}
+                                        >
+                                            {Object.entries(USERS).map(([key, user]) => (
+                                                <option key={key} value={key}>{user.name}</option>
+                                            ))}
+                                        </select>
+                                        <i className="fa-solid fa-chevron-down absolute right-4 top-4 text-slate-400 pointer-events-none"></i>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-inner ${USERS[selectedUser].color}`}>
+                                            <i className={`fa-solid ${USERS[selectedUser].icon}`}></i>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-xl font-black text-slate-800">{USERS[selectedUser].name}</h2>
+                                            <p className="text-xs text-slate-500 font-medium">個人行程表</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                    {userTasks.map((task, idx) => {
+                                        const status = getTaskStatus(task.time);
+                                        const event = getEventForTime(task.time);
+                                        return (
+                                            <div key={idx}>
+                                                {/* 若該時間點有大會進度，顯示 Context 提示 */}
+                                                {event && (event.stage || event.race) && (
+                                                    <div className="flex items-center gap-2 mb-1.5 mt-3 px-1 opacity-70">
+                                                        <i className="fa-solid fa-bullhorn text-xs text-blue-500"></i>
+                                                        <span className="text-xs font-bold text-slate-600">
+                                                            {event.stage && <span className="mr-2 border-b border-blue-200">主台: {event.stage}</span>}
+                                                            {event.race && <span className="text-emerald-600 border-b border-emerald-200">賽事: {event.race}</span>}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                <TaskCard task={task} isLive={status.isLive} isPast={status.isPast} />
+                                            </div>
+                                        )
+                                    })}
+                                    {userTasks.length === 0 && (
+                                        <div className="text-center text-slate-400 py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                            <i className="fa-regular fa-calendar-xmark text-3xl mb-2"></i>
+                                            <p>此人無指派任務</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {}
+                        {/* 視圖 2：全局時間 */}
+                        {view === 'time' && (
+                            <div className="space-y-4">
+                                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 sticky top-0 z-10">
+                                    <label className="block text-sm font-bold text-slate-500 mb-2">請選擇時間點：</label>
+                                    <div className="flex overflow-x-auto hide-scrollbar gap-2 pb-1">
+                                        {TIME_SLOTS.map(time => (
+                                            <button 
+                                                key={time}
+                                                onClick={() => setSelectedTime(time)}
+                                                className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-all ${selectedTime === time ? 'bg-blue-600 text-white shadow-md scale-105' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                            >
+                                                {time}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {getEventForTime(selectedTime) && (getEventForTime(selectedTime).stage || getEventForTime(selectedTime).race) && (
+                                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-2xl border border-blue-100 shadow-sm">
+                                        <h3 className="text-xs font-black text-blue-800 mb-2 tracking-wider flex items-center">
+                                            <i className="fa-solid fa-bolt text-yellow-500 mr-1"></i> 大會進度
+                                        </h3>
+                                        <div className="space-y-1 text-sm font-bold text-slate-700">
+                                            {getEventForTime(selectedTime).stage && <p><span className="text-blue-600 w-12 inline-block">主舞台</span> {getEventForTime(selectedTime).stage}</p>}
+                                            {getEventForTime(selectedTime).race && <p><span className="text-emerald-600 w-12 inline-block">賽事</span> {getEventForTime(selectedTime).race}</p>}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-3">
+                                    {timeTasks.length > 0 ? timeTasks.map((task, idx) => (
+                                        <TaskCard key={idx} task={task} />
+                                    )) : (
+                                        <div className="text-center text-slate-400 py-4"><p>此時間點無定點轉移任務</p></div>
+                                    )}
+
+                                    {/* 顯示全天機動人員 */}
+                                    {mobileUsers.length > 0 && (
+                                        <div className="mt-4 pt-4 border-t border-slate-200 border-dashed">
+                                            <h4 className="text-xs font-bold text-slate-400 mb-2">機動巡視人員</h4>
+                                            {mobileUsers.map((task, idx) => <TaskCard key={`m-${idx}`} task={task} />)}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {}
+                        {/* 視圖 3：樓層佈防 */}
+                        {view === 'floor' && (
+                            <div className="space-y-3">
+                                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                                    <p className="text-sm text-slate-500 font-bold"><i className="fa-solid fa-building mr-1"></i> 全日各樓層攝影師分佈</p>
+                                </div>
+                                {FLOOR_ORDER.map(floor => {
+                                    const tasksOnFloor = TIMELINE_DATA.filter(t => t.floor === floor).sort((a, b) => a.time.localeCompare(b.time));
+                                    if (tasksOnFloor.length === 0) return null;
+                                    
+                                    return (
+                                        <div key={floor} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex">
+                                            <div className={`w-16 sm:w-20 flex flex-col items-center justify-center p-2 shrink-0 ${getFloorStyle(floor)}`}>
+                                                <span className="font-black text-sm sm:text-base text-center break-words">{floor}</span>
+                                            </div>
+                                            <div className="p-3 flex-1">
+                                                {tasksOnFloor.map((task, idx) => (
+                                                    <div key={idx} className="mb-2 last:mb-0 text-sm">
+                                                        <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded mr-2 text-xs">{task.time}</span>
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded-md font-bold mr-2 ${USERS[task.user].color}`}>
+                                                            {USERS[task.user].name}
+                                                        </span>
+                                                        <span className="text-slate-600">{task.task}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </main>
+
+                    {}
+                    {/* 底部導航列 (永遠固定在最底) */}
+                    <nav className="bg-white border-t border-slate-200 flex justify-around p-2 pb-6 sm:pb-4 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)] absolute bottom-0 left-0 right-0 z-30 shrink-0">
+                        <button onClick={() => setView('person')} className={`flex flex-col items-center p-2 w-20 transition-colors ${view === 'person' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                            <i className="fa-solid fa-user-check text-xl mb-1"></i>
+                            <span className="text-[10px] font-bold">我的任務</span>
+                        </button>
+                        <button onClick={() => setView('time')} className={`flex flex-col items-center p-2 w-20 transition-colors ${view === 'time' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                            <i className="fa-regular fa-clock text-xl mb-1"></i>
+                            <span className="text-[10px] font-bold">按時間點</span>
+                        </button>
+                        <button onClick={() => setView('floor')} className={`flex flex-col items-center p-2 w-20 transition-colors ${view === 'floor' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                            <i className="fa-regular fa-building text-xl mb-1"></i>
+                            <span className="text-[10px] font-bold">樓層佈防</span>
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        
+        // 檢查是否有儲存自訂 CSV 網址
+        const GOOGLE_SHEET_CSV_URL = localStorage.getItem('sheetUrl');
+        
+        if (GOOGLE_SHEET_CSV_URL && GOOGLE_SHEET_CSV_URL.trim() !== '') {
+            // 有自訂連結，嘗試下載
+            root.render(
+                <div className="flex flex-col items-center justify-center h-full w-full bg-slate-50 absolute inset-0 z-50">
+                    <i className="fa-solid fa-cloud-arrow-down text-5xl text-blue-500 mb-4 animate-bounce"></i>
+                    <h2 className="text-xl font-black text-slate-800">正在同步排表...</h2>
+                </div>
+            );
+
+            Papa.parse(GOOGLE_SHEET_CSV_URL.trim(), {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    let newRundown = {};
+                    let newTimeline = [];
+                    const colMap = {
+                        '大會1': 'p1', '大會2': 'p2', 'Pauline': 't2', 'Tim': 't1',
+                        '義工1': 'v1', '義工2': 'v2', '義工3': 'v3', '義工4': 'v4'
+                    };
+
+                    results.data.forEach(row => {
+                        if(!row['Time'] || String(row['Time']).trim() === '') return;
+                        
+                        let t = String(row['Time']).trim();
+                        if (t.length === 3) t = `0${t.charAt(0)}:${t.substring(1,3)}`;
+                        else if (t.length === 4 && !t.includes(':')) t = `${t.substring(0,2)}:${t.substring(2,4)}`;
+                        else if (t.includes(':') && t.length === 4) t = `0${t}`; 
+                        
+                        if (row['46/F主舞台'] || row['賽事']) {
+                            newRundown[t] = {
+                                stage: row['46/F主舞台'] || '',
+                                race: row['賽事'] || ''
+                            };
+                        }
+
+                        Object.keys(colMap).forEach(col => {
+                            const cell = row[col];
+                            if(cell && cell.trim() !== '') {
+                                let floor = '機動';
+                                let task = cell;
+                                if(cell.includes(':')) {
+                                    let parts = cell.split(':');
+                                    floor = parts[0].trim();
+                                    task = parts.slice(1).join(':').trim();
+                                } else if (cell.includes('：')) {
+                                    let parts = cell.split('：');
+                                    floor = parts[0].trim();
+                                    task = parts.slice(1).join('：').trim();
+                                }
+                                newTimeline.push({ time: t, user: colMap[col], floor: floor, task: task });
+                            }
+                        });
+                    });
+
+                    if (newTimeline.length > 0) {
+                        EVENT_RUNDOWN = newRundown;
+                        TIMELINE_DATA = newTimeline;
+                        let tTimes = TIMELINE_DATA.map(d => d.time);
+                        let eTimes = Object.keys(EVENT_RUNDOWN);
+                        TIME_SLOTS = [...new Set([...tTimes, ...eTimes])].sort();
+                    }
+                    root.render(<App />);
+                },
+                error: function(err) {
+                    console.error(err);
+                    alert("雲端同步失敗，載入內建穩定版資料。");
+                    root.render(<App />);
+                }
+            });
+        } else {
+            // 無自訂連結，直接啟動內建完美版資料
+            root.render(<App />);
+        }
+    </script>
+</body>
+</html>
